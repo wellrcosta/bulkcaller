@@ -17,7 +17,7 @@ type Config struct {
 	Headers       map[string]string
 	QueryParams   map[string]string
 	Concurrency   int
-	Delay         time.Duration
+	DelayMs       int
 	Timeout       time.Duration
 	OutputDir     string
 	PrintResponse bool

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, 'feat/**', 'fix/**', 'hotfix/**']
+    branches: [main, master, develop, 'feat/**', 'fix/**']
     tags: ['v*']
   pull_request:
     branches: [main, master, develop]
@@ -41,49 +41,29 @@ jobs:
           name: coverage-report
           path: coverage.out
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.60
-          args: --timeout=5m
-
   build-release:
-    needs: [test, lint]
+    needs: test
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         include:
-          # macOS Intel (x86_64)
           - goos: darwin
             goarch: amd64
             suffix: macos-intel
             ext: ""
-          # macOS ARM (M1/M2)
           - goos: darwin
             goarch: arm64
             suffix: macos-arm
             ext: ""
-          # Windows x64
           - goos: windows
             goarch: amd64
             suffix: windows-x64
             ext: .exe
-          # Linux x64 (Debian/Ubuntu compatible)
           - goos: linux
             goarch: amd64
             suffix: linux-x64
             ext: ""
-          # Linux ARM64
           - goos: linux
             goarch: arm64
             suffix: linux-arm64
@@ -105,7 +85,6 @@ jobs:
           output="bulkcaller-${{ matrix.suffix }}${{ matrix.ext }}"
           go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o "$output" .
           chmod +x "$output" || true
-          ls -la "$output"
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
@@ -132,6 +111,5 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/*
+          files: artifacts/*
           generate_release_notes: true

@@ -5,26 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
-// Reader defines the interface for reading data files
-type Reader interface {
-	Read(path string) ([][]string, error)
-}
-
-// ReadFile reads a CSV, XLS, or XLSX file and returns rows as string slices
+// ReadFile reads a CSV file and returns rows as string slices
 func ReadFile(path string) ([][]string, error) {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case ".csv":
-		return readCSV(path)
-	case ".xls", ".xlsx":
-		return readExcel(path)
-	default:
-		return nil, fmt.Errorf("unsupported file format: %s", ext)
+	if !strings.HasSuffix(strings.ToLower(path), ".csv") {
+		return nil, fmt.Errorf("only CSV files are supported currently")
 	}
+	return readCSV(path)
 }
 
 func readCSV(path string) ([][]string, error) {
@@ -35,7 +24,7 @@ func readCSV(path string) ([][]string, error) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = -1 // Allow variable fields per record
+	reader.FieldsPerRecord = -1
 
 	var records [][]string
 	for {

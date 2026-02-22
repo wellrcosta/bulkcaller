@@ -20,17 +20,17 @@ import (
 var version = "dev"
 
 type Config struct {
-	FilePath      string
-	URL           string
-	Method        string
-	BodyTemplate  string
-	Headers       map[string]string
-	QueryParams   map[string]string
-	Concurrency   int
-	DelayMs       int
-	OutputDir     string
+	FilePath     string
+	URL          string
+	Method       string
+	BodyTemplate string
+	Headers      map[string]string
+	QueryParams  map[string]string
+	Concurrency  int
+	DelayMs      int
+	OutputDir    string
 	PrintResponse bool
-	MaxRetries    int
+	MaxRetries   int
 }
 
 func main() {
@@ -41,7 +41,7 @@ func main() {
 	flag.StringVar(&config.FilePath, "file", "", "Path to CSV/XLS/XLSX file")
 	flag.StringVar(&config.URL, "url", "", "Target URL")
 	flag.StringVar(&config.Method, "method", "POST", "HTTP method (GET, POST, PUT, PATCH, DELETE)")
-	flag.StringVar(&config.BodyTemplate, "body", "", "JSON body template with placeholders like {{columnName}}")
+	flag.StringVar(&config.BodyTemplate, "body", "", "JSON body template with placeholders like ${columnName}")
 	flag.StringVar(&headersStr, "headers", "", "Headers as key:value pairs, comma-separated")
 	flag.StringVar(&queryStr, "query", "", "Query params as key=value pairs, comma-separated")
 	flag.IntVar(&config.Concurrency, "concurrency", 10, "Number of concurrent workers")
@@ -60,7 +60,7 @@ func main() {
 	if config.FilePath == "" || config.URL == "" || config.BodyTemplate == "" {
 		fmt.Fprintf(os.Stderr, "usage: bulkcaller -file <data> -url <endpoint> -body <template>\n\n")
 		fmt.Fprintf(os.Stderr, "Example:\n")
-		fmt.Fprintf(os.Stderr, "  bulkcaller -file data.csv -url https://api.example.com -body '{\"name\":\"{{name}}\"}'\n\n")
+		fmt.Fprintf(os.Stderr, "  bulkcaller -file data.csv -url https://api.example.com -body '{\"name\":\"${name}\"}'\n\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -93,7 +93,7 @@ func parseKeyValue(s, sep string) map[string]string {
 }
 
 func extractPlaceholders(template string) []string {
-	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
+	re := regexp.MustCompile(`\$\{([^}]+)\}`)
 	matches := re.FindAllStringSubmatch(template, -1)
 	seen := make(map[string]bool)
 	var result []string
@@ -122,6 +122,7 @@ func run(config Config) error {
 
 	headers := records[0]
 	data := records[1:]
+
 	log.Printf("📊 Total rows to process: %d\n", len(data))
 
 	if config.OutputDir != "" {
@@ -148,6 +149,7 @@ func run(config Config) error {
 	go collectResults(results, config, len(data))
 
 	client := &http.Client{Timeout: 30 * time.Second}
+
 	for i := 0; i < config.Concurrency; i++ {
 		wg.Add(1)
 		go worker(i, client, config, targetURL, placeholders, headers, jobs, results, &wg)
@@ -171,8 +173,8 @@ func run(config Config) error {
 			log.Printf("⏳ Queued %d/%d rows...", processed, total)
 		}
 	}
-	close(jobs)
 
+	close(jobs)
 	wg.Wait()
 	close(results)
 
@@ -194,16 +196,15 @@ type RequestResult struct {
 
 func worker(id int, client *http.Client, config Config, targetURL string, placeholders []string, headers []string, jobs <-chan map[string]string, results chan<- RequestResult, wg *sync.WaitGroup) {
 	defer wg.Done()
-
 	for row := range jobs {
 		body := config.BodyTemplate
 		for _, col := range headers {
 			if val, ok := row[col]; ok {
-				placeholder := "{{" + col + "}}"
+				placeholder := "${" + col + "}"
 				body = strings.ReplaceAll(body, placeholder, val)
 			}
 		}
-		body = strings.ReplaceAll(body, "{{__index__}}", row["__index__"])
+		body = strings.ReplaceAll(body, "${__index__}", row["__index__"])
 
 		var jsonBody map[string]interface{}
 		if err := json.Unmarshal([]byte(body), &jsonBody); err != nil {
@@ -230,7 +231,6 @@ func parseIndex(s string) int {
 
 func doRequest(client *http.Client, method, url string, headers map[string]string, body string, maxRetries int) (time.Duration, int, []byte, error) {
 	var lastErr error
-
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(time.Duration(attempt) * time.Second)
@@ -255,12 +255,34 @@ func doRequest(client *http.Client, method, url string, headers map[string]strin
 		}
 
 		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+				resp.Body.Close()
 		duration := time.Since(start)
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			return duration, resp.StatusCode, respBody, nil
 		}
-
 		lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
-		
+	}
+	return 0, 0, nil, lastErr
+}
+
+func collectResults(results <-chan RequestResult, config Config, total int) {
+	success := 0
+	failed := 0
+	for r := range results {
+		if r.Error != nil {
+			failed++
+			log.Printf("❌ Row %d failed: %v", r.Index, r.Error)
+		} else {
+			success++
+			if config.PrintResponse {
+				log.Printf("✅ Row %d: HTTP %d (%v)", r.Index, r.StatusCode, r.Duration)
+			}
+		}
+		if config.OutputDir != "" {
+			filename := fmt.Sprintf("%s/response_%d.json", config.OutputDir, r.Index)
+			os.WriteFile(filename, r.Body, 0644)
+		}
+	}
+	log.Printf("📈 Results: %d success, %d failed", success, failed)
+}

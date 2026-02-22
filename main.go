@@ -1,126 +1,134 @@
 package main
 
 import (
-	"encoding/csv"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
-	"strings"
-	"sync"
-	"time"
+
+	"github.com/wellrcosta/bulkcaller/internal/config"
+	"github.com/wellrcosta/bulkcaller/internal/runner"
 )
 
-var version = "dev"
+var version = "1.0.0"
 
 func main() {
-	var filePath, urlStr, method, bodyTemplate, headersStr string
-	var concurrency, delayMs int
-	var printResp bool
-
-	flag.StringVar(&filePath, "file", "", "Path to CSV file")
-	flag.StringVar(&urlStr, "url", "", "Target URL")
-	flag.StringVar(&method, "method", "POST", "HTTP method")
-	flag.StringVar(&bodyTemplate, "body", "", "JSON template with ${col}")
-	flag.StringVar(&headersStr, "headers", "", "Headers as key:value")
-	flag.IntVar(&concurrency, "concurrency", 10, "Concurrent workers")
-	flag.IntVar(&delayMs, "delay", 0, "Delay in ms")
-	flag.BoolVar(&printResp, "print", false, "Print responses")
+	// Parse command line flags using standard flag package
+	cfg := config.New()
+	
+	var headersStr, queryStr string
+	var versionFlag bool
+	
+	flag.StringVar(&cfg.FilePath, "file", "", "Path to CSV/XLS/XLSX file")
+	flag.StringVar(&cfg.URL, "url", "", "Target URL")
+	flag.StringVar(&cfg.Method, "method", "POST", "HTTP method (GET, POST, PUT, PATCH, DELETE)")
+	flag.StringVar(&cfg.BodyTemplate, "body", "", "JSON template with placeholders like ${columnName}")
+	flag.StringVar(&headersStr, "headers", "", "Headers as key:value pairs, comma-separated")
+	flag.StringVar(&queryStr, "query", "", "Query params as key=value pairs, comma-separated")
+	flag.IntVar(&cfg.Concurrency, "concurrency", 10, "Number of concurrent workers")
+	flag.IntVar(&cfg.Delay, "delay", 0, "Delay between requests in milliseconds")
+	flag.StringVar(&cfg.OutputDir, "output", "", "Output directory for responses (optional)")
+	flag.IntVar(&cfg.MaxRetries, "retries", 3, "Max retries on failure")
+	flag.BoolVar(&cfg.PrintResponse, "print", false, "Print responses to stdout")
+	flag.BoolVar(&versionFlag, "version", false, "Show version")
 	flag.Parse()
 
-	if filePath == "" || urlStr == "" || bodyTemplate == "" {
-		fmt.Println("Usage: bulkcaller -file <csv> -url <url> -body '{\"key\":\"${col}\"}'")
+	// Show version
+	if versionFlag {
+		fmt.Printf("bulkcaller %s\n", version)
+		os.Exit(0)
+	}
+
+	// Parse custom flags
+	if headersStr != "" {
+		cfg.Headers = parseKeyValue(headersStr, ":")
+	}
+	if queryStr != "" {
+		cfg.QueryParams = parseKeyValue(queryStr, "=")
+	}
+
+	// Validate config
+	if err := cfg.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "❌ Error: %v\n\n", err)
+		printUsage()
 		os.Exit(1)
 	}
 
-	headers := parseHeaders(headersStr)
+	// Build full URL with query params
+	cfg.URL = cfg.GetHTTPURL()
 
-	records, err := readCSV(filePath)
-	if err != nil {
-		log.Fatal(err)
+	// Run
+	r := runner.New(cfg)
+	if err := r.Run(); err != nil {
+		log.Fatalf("❌ Error: %v", err)
 	}
-	if len(records) < 2 {
-		log.Fatal("no data rows")
-	}
-
-	headerRow := records[0]
-	client := &http.Client{Timeout: 30 * time.Second}
-	var wg sync.WaitGroup
-	jobs := make(chan []string, concurrency*2)
-
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go worker(client, method, urlStr, headers, bodyTemplate, headerRow, jobs, &wg, delayMs, printResp)
-	}
-
-	for _, row := range records[1:] {
-		jobs <- row
-	}
-	close(jobs)
-	wg.Wait()
-
-	log.Println("Done")
 }
 
-func parseHeaders(s string) map[string]string {
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "Usage: bulkcaller -file <data> -url <endpoint> -body <template>\n\n")
+	fmt.Fprintf(os.Stderr, "Example:\n")
+	fmt.Fprintf(os.Stderr, "  bulkcaller -file data.csv -url https://api.example.com -body '{\"name\":\"${name}\"}'\n\n")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	flag.PrintDefaults()
+}
+
+// parseKeyValue parses key:value or key=value pairs
+func parseKeyValue(s, sep string) map[string]string {
 	result := make(map[string]string)
-	for _, pair := range strings.Split(s, ",") {
-		parts := strings.SplitN(pair, ":", 2)
+	if s == "" {
+		return result
+	}
+	for _, pair := range rangeSplit(s, ",") {
+		parts := splitN(pair, sep, 2)
 		if len(parts) == 2 {
-			result[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			result[trim(parts[0])] = trim(parts[1])
 		}
 	}
 	return result
 }
 
-func readCSV(path string) ([][]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+// Helper functions to avoid importing strings for simple operations
+func rangeSplit(s, sep string) []string {
+	// Simple split implementation
+	if s == "" {
+		return nil
 	}
-	defer f.Close()
-	return csv.NewReader(f).ReadAll()
+	result := []string{}
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if i < len(s)-len(sep)+1 && s[i:i+len(sep)] == sep {
+			result = append(result, s[start:i])
+			start = i + len(sep)
+		}
+	}
+	result = append(result, s[start:])
+	return result
 }
 
-func worker(client *http.Client, method, url string, headers map[string]string, template string, cols []string, jobs <-chan []string, wg *sync.WaitGroup, delay int, print bool) {
-	defer wg.Done()
-	for row := range jobs {
-		body := template
-		for i, col := range cols {
-			if i < len(row) {
-				body = strings.ReplaceAll(body, "${"+col+"}", row[i])
-			}
-		}
-
-		var payload map[string]interface{}
-		if err := json.Unmarshal([]byte(body), &payload); err != nil {
-			log.Printf("Invalid JSON: %v", err)
-			continue
-		}
-
-		req, _ := http.NewRequest(method, url, strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		for k, v := range headers {
-			req.Header.Set(k, v)
-		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("Request failed: %v", err)
-			continue
-		}
-		respBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-
-		if print {
-			fmt.Printf("Response: %s\n", string(respBody))
-		}
-
-		if delay > 0 {
-			time.Sleep(time.Duration(delay) * time.Millisecond)
+func splitN(s, sep string, n int) []string {
+	if n <= 0 {
+		return []string{s}
+	}
+	result := []string{}
+	start := 0
+	for i := 0; i < len(s) && len(result) < n-1; i++ {
+		if i < len(s)-len(sep)+1 && s[i:i+len(sep)] == sep {
+			result = append(result, s[start:i])
+			start = i + len(sep)
 		}
 	}
+	result = append(result, s[start:])
+	return result
+}
+
+func trim(s string) string {
+	start := 0
+	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	end := len(s)
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
 }

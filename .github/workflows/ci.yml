@@ -2,10 +2,10 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: [main, master, develop, 'feat/**', 'fix/**', 'hotfix/**']
     tags: ['v*']
   pull_request:
-    branches: [main, master]
+    branches: [main, master, develop]
 
 jobs:
   test:

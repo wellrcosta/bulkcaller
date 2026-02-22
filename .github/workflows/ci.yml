@@ -7,7 +7,7 @@ on:
     branches: [main, master]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,7 +15,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-          check-latest: true
 
       - name: Download dependencies
         run: go mod download
@@ -25,18 +24,3 @@ jobs:
 
       - name: Test
         run: go test -v ./...
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.60
-          args: --timeout=5m

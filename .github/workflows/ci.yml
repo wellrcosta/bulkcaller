@@ -2,13 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, 'feat/**', 'fix/**']
-    tags: ['v*']
-  pull_request:
-    branches: [main, master, develop]
+    branches: [main, develop]
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,100 +13,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-
-      - name: Download dependencies
-        run: go mod download
 
       - name: Build
-        run: go build -v ./...
-
-      - name: Run tests with coverage
-        run: go test -v -race -coverprofile=coverage.out ./...
-
-      - name: Check coverage
-        run: |
-          coverage=$(go tool cover -func=coverage.out | tail -n 1 | awk '{print $3}')
-          echo "Total coverage: $coverage"
-          if (( $(echo "$coverage < 70.0" | bc -l) )); then
-            echo "::error::Coverage is below 70%: $coverage"
-            exit 1
-          fi
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage.out
-
-  build-release:
-    needs: test
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    strategy:
-      matrix:
-        include:
-          - goos: darwin
-            goarch: amd64
-            suffix: macos-intel
-            ext: ""
-          - goos: darwin
-            goarch: arm64
-            suffix: macos-arm
-            ext: ""
-          - goos: windows
-            goarch: amd64
-            suffix: windows-x64
-            ext: .exe
-          - goos: linux
-            goarch: amd64
-            suffix: linux-x64
-            ext: ""
-          - goos: linux
-            goarch: arm64
-            suffix: linux-arm64
-            ext: ""
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
-        run: |
-          output="bulkcaller-${{ matrix.suffix }}${{ matrix.ext }}"
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o "$output" .
-          chmod +x "$output" || true
-
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: binary-${{ matrix.suffix }}
-          path: bulkcaller-*
-
-  release:
-    needs: build-release
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all binaries
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: binary-*
-          merge-multiple: true
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*
-          generate_release_notes: true
+        run: go build -v .

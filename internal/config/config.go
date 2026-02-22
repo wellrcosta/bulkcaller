@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -17,7 +16,7 @@ type Config struct {
 	Headers       map[string]string
 	QueryParams   map[string]string
 	Concurrency   int
-	DelayMs       int
+	Delay         int
 	Timeout       time.Duration
 	OutputDir     string
 	PrintResponse bool
@@ -37,79 +36,6 @@ func New() *Config {
 	}
 }
 
-// ParseFlags parses command line flags
-func (c *Config) ParseFlags(args []string) error {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch arg {
-		case "-file":
-			if i+1 < len(args) {
-				c.FilePath = args[i+1]
-				i++
-			}
-		case "-url":
-			if i+1 < len(args) {
-				c.URL = args[i+1]
-				i++
-			}
-		case "-method":
-			if i+1 < len(args) {
-				c.Method = args[i+1]
-				i++
-			}
-		case "-body":
-			if i+1 < len(args) {
-				c.BodyTemplate = args[i+1]
-				i++
-			}
-		case "-headers":
-			if i+1 < len(args) {
-				c.Headers = parseKeyValue(args[i+1], ":")
-				i++
-			}
-		case "-query":
-			if i+1 < len(args) {
-				c.QueryParams = parseKeyValue(args[i+1], "=")
-				i++
-			}
-		case "-concurrency":
-			if i+1 < len(args) {
-				if n, err := strconv.Atoi(args[i+1]); err == nil {
-					c.Concurrency = n
-				}
-				i++
-			}
-		case "-delay":
-			if i+1 < len(args) {
-				if n, err := strconv.Atoi(args[i+1]); err == nil {
-					c.Delay = time.Duration(n) * time.Millisecond
-				}
-				i++
-			}
-		case "-timeout":
-			if i+1 < len(args) {
-				c.Timeout = parseDuration(args[i+1])
-				i++
-			}
-		case "-output":
-			if i+1 < len(args) {
-				c.OutputDir = args[i+1]
-				i++
-			}
-		case "-max-retries":
-			if i+1 < len(args) {
-				if n, err := strconv.Atoi(args[i+1]); err == nil {
-					c.MaxRetries = n
-				}
-				i++
-			}
-		case "-print":
-			c.PrintResponse = true
-		}
-	}
-	return nil
-}
-
 // Validate checks if required fields are set
 func (c *Config) Validate() error {
 	if c.FilePath == "" {
@@ -124,52 +50,21 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// parseKeyValue parses key:value or key=value pairs
-func parseKeyValue(s, sep string) map[string]string {
-	result := make(map[string]string)
-	if s == "" {
-		return result
-	}
-	pairs := strings.Split(s, ",")
-	for _, pair := range pairs {
-		parts := strings.SplitN(strings.TrimSpace(pair), sep, 2)
-		if len(parts) == 2 {
-			result[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-		}
-	}
-	return result
-}
-
-// parseDuration parses duration string
-func parseDuration(s string) time.Duration {
-	d, _ := time.ParseDuration(s)
-	if d == 0 {
-		d = 30 * time.Second
-	}
-	return d
-}
-
-// GetVersion returns the app version
-func GetVersion() string {
-	return "1.0.0"
-}
-
 // GetHTTPURL returns URL with query params
 func (c *Config) GetHTTPURL() string {
 	if len(c.QueryParams) == 0 {
 		return c.URL
 	}
-	
-	// Add query params to URL
+
 	sep := "?"
 	if strings.Contains(c.URL, "?") {
 		sep = "&"
 	}
-	
+
 	var params []string
 	for k, v := range c.QueryParams {
 		params = append(params, fmt.Sprintf("%s=%s", k, v))
 	}
-	
+
 	return c.URL + sep + strings.Join(params, "&")
 }

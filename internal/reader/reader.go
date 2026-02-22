@@ -5,15 +5,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
-// ReadFile reads a CSV file and returns rows as string slices
+type Reader struct{}
+
+func New() *Reader {
+	return &Reader{}
+}
+
 func ReadFile(path string) ([][]string, error) {
-	if !strings.HasSuffix(strings.ToLower(path), ".csv") {
-		return nil, fmt.Errorf("only CSV files are supported currently")
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".csv":
+		return readCSV(path)
+	case ".xls", ".xlsx":
+		return readExcel(path)
+	default:
+		return nil, fmt.Errorf("unsupported file format: %s", ext)
 	}
-	return readCSV(path)
 }
 
 func readCSV(path string) ([][]string, error) {

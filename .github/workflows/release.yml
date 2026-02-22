@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS
+          - os: darwin
+            arch: amd64
+            runner: macos-latest
+          - os: darwin
+            arch: arm64
+            runner: macos-latest
+          # Windows
+          - os: windows
+            arch: amd64
+            runner: windows-latest
+          # Linux Debian
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            debian: true
+          # Linux Arch
+          - os: linux
+            arch: amd64
+            runner: ubuntu-latest
+            arch_linux: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Setup Go
+        uses: actions/setup-go@3041bf56c941b36c51748e4e0adcae8444840643 # v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          mkdir -p dist
+          output="bulkcaller-${{ matrix.os }}-${{ matrix.arch }}"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            output="${output}.exe"
+          fi
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o "dist/${output}" .
+        shell: bash
+
+      - name: Create Debian Package
+        if: matrix.debian
+        run: |
+          mkdir -p dist/debian/DEBIAN
+          mkdir -p dist/debian/usr/local/bin
+          cp dist/bulkcaller-linux-amd64 dist/debian/usr/local/bin/bulkcaller
+          chmod +x dist/debian/usr/local/bin/bulkcaller
+          
+          cat > dist/debian/DEBIAN/control << EOF
+          Package: bulkcaller
+          Version: ${{ github.ref_name }}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: wellrcosta
+          Description: Bulk HTTP request tool
+          EOF
+          
+          dpkg-deb --build dist/debian dist/bulkcaller-${{ github.ref_name }}-debian-amd64.deb
+        shell: bash
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@65c4c36a8bd3d97b78d4dc15e82c3b596e023ea2 # v4
+        with:
+          name: bulkcaller-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*
+          retention-days: 5
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@fa0a91b85d4f4043a23877deadde8c6d56466805 # v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Create Release
+        uses: softprops/action-gh-release@01587a9e9b2b043c111bce8ebceb3a86eb4597de # v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

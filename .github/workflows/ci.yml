@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/setup-go@3041bf56c941b36c51748e4e0adcae8444840643 # v5
+        with:
+          go-version: '1.23'
+          check-latest: true
+      - run: go mod tidy
+      - run: go build .
+      - run: go test ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/setup-go@3041bf56c941b36c51748e4e0adcae8444840643 # v5
+        with:
+          go-version: '1.23'
+      - uses: golangci/golangci-lint-action@971e284b6050e8a5849e72044c27b7de2d4057fb # v6
+        with:
+          version: latest

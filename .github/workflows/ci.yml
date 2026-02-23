@@ -3,41 +3,101 @@ name: CI
 on:
   push:
     branches: [main, develop]
-  pull_request:
-    branches: [main, develop]
+    tags: ['v*']
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-
       - name: Build
         run: go build -v .
-
       - name: Test
         run: go test -v ./...
 
-  release:
+  build-windows:
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
-
-      - name: Build binary
-        run: go build -o bulkcaller .
-
-      - name: Upload artifact
+      - name: Build for Windows
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o bulkcaller-windows-x64.exe .
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bulkcaller
-          path: bulkcaller
+          name: bulkcaller-windows-x64
+          path: bulkcaller-windows-x64.exe
+
+  build-macos-intel:
+    needs: test
+    runs-on: macos-13
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build for macOS Intel
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o bulkcaller-macos-intel .
+      - name: Upload macOS Intel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bulkcaller-macos-intel
+          path: bulkcaller-macos-intel
+
+  build-linux:
+    needs: test
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Build for Linux
+        env:
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o bulkcaller-linux-x64 .
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bulkcaller-linux-x64
+          path: bulkcaller-linux-x64
+
+  release:
+    needs: [build-windows, build-macos-intel, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
